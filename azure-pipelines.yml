@@ -1,0 +1,59 @@
+trigger:
+  branches:
+      include:
+        - main
+
+variables:
+  imageName: 'exampledevops'
+  DOCKER_BUILDKIT: 1
+
+jobs:
+
+
+- job: build
+  steps:
+  - checkout: self
+  - task: Docker@2
+    inputs:
+      containerRegistry: 'Docker Hub Juan Ruiz'
+      repository: $(imageName)
+      command: 'build'
+      Dockerfile: '**/Dockerfile'
+      buildContext: '.'
+      arguments: >
+        --build-arg BUILD_NUMBER=$(Build.BuildNumber)
+      tags: |
+        $(Build.BuildId)
+        latest
+    displayName: 'Compilar aplicación'
+  
+  - script: |
+      docker run --name $(imageName)-container -d --rm $(imageName):$(Build.BuildId) npm start
+    displayName: 'Subir Aplicación'
+
+  - script: |
+      status="unknown"
+      attempts=0
+      while [ "$status" != "running" ] && [ "$attempts" -lt 30 ]; do
+        status=$(docker inspect -f '{{.State.Status}}' $(imageName)-container)
+        if [ "$status" != "running" ]; then
+          echo "Waiting for container to start..."
+          attempts=$((attempts+1))
+          sleep 1
+        fi
+      done
+      if [ "$status" != "running" ]; then
+        echo "Timeout waiting for container to start."
+        exit 1
+      fi
+    displayName: 'Esperar a que el contenedor este arriba'
+  
+  - script: docker ps
+    displayName: 'Listar contenedores'
+  
+  - script: |
+      sleep 10 # Espera unos segundos para que la aplicación se inicie completamente
+      docker exec $(imageName)-container npm test
+    displayName: 'Correr pruebas unitarias'
+
+  
